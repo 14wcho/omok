@@ -86,8 +86,9 @@
     <div id="lobby-error"></div>
   </div>
   <div class="card">
-    <h2>🖥️ 같은 컴퓨터</h2>
-    <button class="secondary" onclick="startLocal()">로컬 대전</button>
+    <h2>🖥️ 같은 컴퓨터 / 혼자</h2>
+    <button class="secondary" onclick="startLocal()">로컬 대전 (2인)</button>
+    <button class="secondary" onclick="startAI()">AI 대전</button>
   </div>
 </div>
 
@@ -126,7 +127,7 @@ canvas.width = canvas.height = SIZE;
 // ── 상태 ──────────────────────────────────────────────
 let board, currentPlayer, gameOver;
 let scoreBlack = 0, scoreWhite = 0;
-let mode = 'local';   // 'local' | 'online'
+let mode = 'local';   // 'local' | 'online' | 'ai'
 let myColor = 1;      // 온라인: 1=흑 2=백
 let peer = null, conn = null;
 let myCode = '';
@@ -233,6 +234,17 @@ function updateOnlineStatus() {
 }
 
 // ── 로컬 게임 ─────────────────────────────────────────
+function startAI() {
+  mode = 'ai';
+  scoreBlack = 0; scoreWhite = 0;
+  document.getElementById('scoreBlack').textContent = 0;
+  document.getElementById('scoreWhite').textContent = 0;
+  document.getElementById('online-badge').textContent = 'AI 대전 | 나: ⚫ 흑';
+  show('game');
+  resetGame();
+  setStatus('⚫ 내 차례 (흑)');
+}
+
 function startLocal() {
   mode = 'local';
   scoreBlack = 0; scoreWhite = 0;
@@ -265,6 +277,7 @@ function requestRestart() {
 canvas.addEventListener('click', e => {
   if (gameOver) return;
   if (mode === 'online' && currentPlayer !== myColor) return;
+  if (mode === 'ai' && currentPlayer === 2) return;
   const rect = canvas.getBoundingClientRect();
   const c = Math.round(((e.clientX - rect.left) * (canvas.width / rect.width) - PAD) / CELL);
   const r = Math.round(((e.clientY - rect.top) * (canvas.height / rect.height) - PAD) / CELL);
@@ -272,6 +285,7 @@ canvas.addEventListener('click', e => {
 
   applyPlace(r, c, currentPlayer);
   if (mode === 'online') send({ type: 'place', r, c, player: currentPlayer });
+  if (mode === 'ai' && !gameOver) setTimeout(aiMove, 300);
 });
 
 canvas.addEventListener('mousemove', e => {
@@ -351,6 +365,54 @@ function drawStone(r, c, player, alpha=1) {
   else{g.addColorStop(0,'#fff');g.addColorStop(1,'#ccc');}
   ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
   ctx.globalAlpha=1;
+}
+
+// ── AI ───────────────────────────────────────────────
+function aiMove() {
+  if (gameOver || currentPlayer !== 2) return;
+  const move = getBestMove();
+  applyPlace(move.r, move.c, 2);
+}
+
+function getBestMove() {
+  // 1. AI 이기는 수
+  for (let r=0;r<BOARD;r++) for (let c=0;c<BOARD;c++) if (!board[r][c]) {
+    board[r][c]=2; if(checkWin(r,c,2)){board[r][c]=0;return{r,c};} board[r][c]=0;
+  }
+  // 2. 플레이어 막기
+  for (let r=0;r<BOARD;r++) for (let c=0;c<BOARD;c++) if (!board[r][c]) {
+    board[r][c]=1; if(checkWin(r,c,1)){board[r][c]=0;return{r,c};} board[r][c]=0;
+  }
+  // 3. 점수 기반
+  let best=-Infinity, bestMove={r:7,c:7};
+  for (let r=0;r<BOARD;r++) for (let c=0;c<BOARD;c++) {
+    if (board[r][c]||!hasNeighbor(r,c)) continue;
+    const s = scorePos(r,c,2)*2 + scorePos(r,c,1);
+    if (s>best){best=s;bestMove={r,c};}
+  }
+  return bestMove;
+}
+
+function hasNeighbor(r,c) {
+  for(let dr=-2;dr<=2;dr++) for(let dc=-2;dc<=2;dc++){
+    const nr=r+dr,nc=c+dc;
+    if(nr>=0&&nr<BOARD&&nc>=0&&nc<BOARD&&board[nr][nc]) return true;
+  }
+  return false;
+}
+
+function scorePos(r,c,player) {
+  const dirs=[[0,1],[1,0],[1,1],[1,-1]];
+  let total=0;
+  board[r][c]=player;
+  for(const[dr,dc]of dirs){
+    let count=1,open=0;
+    for(let d=1;d<5;d++){const nr=r+dr*d,nc=c+dc*d;if(nr<0||nr>=BOARD||nc<0||nc>=BOARD)break;if(board[nr][nc]===player)count++;else{if(!board[nr][nc])open++;break;}}
+    for(let d=1;d<5;d++){const nr=r-dr*d,nc=c-dc*d;if(nr<0||nr>=BOARD||nc<0||nc>=BOARD)break;if(board[nr][nc]===player)count++;else{if(!board[nr][nc])open++;break;}}
+    total+=[0,1,10,100,1000,100000][Math.min(count,5)]*(open+1);
+  }
+  board[r][c]=0;
+  return total;
 }
 
 // ── 유틸 ─────────────────────────────────────────────
