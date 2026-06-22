@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>오목</title>
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: #1a1a2e;
+      color: #eee;
+      font-family: 'Segoe UI', sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 20px;
+    }
+    h1 { font-size: 2rem; margin-bottom: 16px; letter-spacing: 4px; color: #e2b96f; }
+
+    /* 로비 */
+    #lobby { display: flex; flex-direction: column; align-items: center; gap: 14px; width: 100%; max-width: 340px; }
+    .card { background: #16213e; border: 1px solid #2a2a5a; border-radius: 12px; padding: 20px; width: 100%; text-align: center; }
+    .card h2 { color: #e2b96f; margin-bottom: 14px; font-size: 1rem; letter-spacing: 2px; }
+    input {
+      width: 100%; padding: 10px 14px;
+      border: 2px solid #2a2a5a; border-radius: 8px;
+      background: #0f0f23; color: #eee;
+      font-size: 1.3rem; text-align: center; letter-spacing: 4px;
+      margin-bottom: 10px; outline: none;
+    }
+    input:focus { border-color: #e2b96f; }
+    button {
+      padding: 10px 24px; border: 2px solid #e2b96f;
+      background: transparent; color: #e2b96f;
+      border-radius: 8px; cursor: pointer; font-size: 0.95rem;
+      transition: all 0.2s; width: 100%; margin-top: 4px;
+    }
+    button:hover, button.active { background: #e2b96f; color: #1a1a2e; }
+    button.secondary { border-color: #555; color: #aaa; }
+    button.secondary:hover { background: #555; color: #eee; }
+    #lobby-error { color: #e07070; font-size: 0.85rem; min-height: 18px; margin-top: 6px; }
+
+    /* 대기 */
+    #waiting { display: none; flex-direction: column; align-items: center; gap: 14px; text-align: center; max-width: 340px; }
+    #room-code-display {
+      font-size: 2.6rem; font-weight: bold; letter-spacing: 8px; color: #e2b96f;
+      background: #16213e; padding: 16px 32px; border-radius: 12px; border: 2px dashed #e2b96f;
+      cursor: pointer; user-select: all;
+    }
+    #copy-hint { font-size: 0.78rem; color: #888; }
+
+    /* 게임 */
+    #game { display: none; flex-direction: column; align-items: center; }
+    #top-bar { display: flex; gap: 10px; margin-bottom: 10px; }
+    .ctrl-btn {
+      padding: 8px 18px; border: 2px solid #e2b96f;
+      background: transparent; color: #e2b96f;
+      border-radius: 6px; cursor: pointer; font-size: 0.88rem;
+      transition: all 0.2s; width: auto;
+    }
+    .ctrl-btn:hover { background: #e2b96f; color: #1a1a2e; }
+    #online-badge { font-size: 0.8rem; color: #888; margin-bottom: 6px; }
+    #online-badge span { color: #e2b96f; font-weight: bold; }
+    #status { font-size: 1.05rem; margin-bottom: 10px; min-height: 26px; color: #ccc; text-align: center; }
+    #status b { color: #e2b96f; }
+    canvas { display: block; cursor: pointer; border-radius: 4px; }
+    #score { display: flex; gap: 40px; margin-top: 14px; }
+    .score-box { text-align: center; }
+    .score-box .label { color: #aaa; font-size: 0.8rem; margin-bottom: 4px; }
+    .score-box .value { font-size: 1.6rem; font-weight: bold; color: #e2b96f; }
+  </style>
+</head>
+<body>
+<h1>오 목</h1>
+
+<!-- 로비 -->
+<div id="lobby">
+  <div class="card">
+    <h2>🌐 온라인 대전</h2>
+    <button onclick="hostGame()">방 만들기 (내가 초대)</button>
+    <div style="margin:12px 0;color:#444;font-size:0.85rem;">── 또는 ──</div>
+    <input id="codeInput" placeholder="코드 입력" maxlength="6" oninput="this.value=this.value.toUpperCase()" />
+    <button onclick="joinGame()">참가하기 (코드 입력)</button>
+    <div id="lobby-error"></div>
+  </div>
+  <div class="card">
+    <h2>🖥️ 같은 컴퓨터</h2>
+    <button class="secondary" onclick="startLocal()">로컬 대전</button>
+  </div>
+</div>
+
+<!-- 대기 -->
+<div id="waiting">
+  <p style="color:#aaa;font-size:0.9rem;">동생한테 이 코드를 알려주세요!</p>
+  <div id="room-code-display" onclick="copyCode()" title="클릭해서 복사"></div>
+  <div id="copy-hint">클릭하면 복사돼요</div>
+  <p style="color:#666;font-size:0.85rem;">상대방 연결 기다리는 중...</p>
+  <button class="secondary" style="max-width:180px;width:180px" onclick="cancelWait()">취소</button>
+</div>
+
+<!-- 게임 -->
+<div id="game">
+  <div id="online-badge"></div>
+  <div id="top-bar">
+    <button class="ctrl-btn" onclick="requestRestart()">새 게임</button>
+    <button class="ctrl-btn secondary" onclick="backToLobby()">← 로비</button>
+  </div>
+  <div id="status"></div>
+  <canvas id="canvas"></canvas>
+  <div id="score">
+    <div class="score-box"><div class="label">⚫ 흑</div><div class="value" id="scoreBlack">0</div></div>
+    <div class="score-box"><div class="label">⚪ 백</div><div class="value" id="scoreWhite">0</div></div>
+  </div>
+</div>
+
+<script>
+// ── 상수 ──────────────────────────────────────────────
+const BOARD = 15, CELL = 40, PAD = 40;
+const SIZE = (BOARD - 1) * CELL + PAD * 2;
+const canvas = document.getElementById('canvas');
+const ctx = canvas.getContext('2d');
+canvas.width = canvas.height = SIZE;
+
+// ── 상태 ──────────────────────────────────────────────
+let board, currentPlayer, gameOver;
+let scoreBlack = 0, scoreWhite = 0;
+let mode = 'local';   // 'local' | 'online'
+let myColor = 1;      // 온라인: 1=흑 2=백
+let peer = null, conn = null;
+let myCode = '';
+
+// ── 화면 전환 ─────────────────────────────────────────
+function show(id) {
+  ['lobby','waiting','game'].forEach(s =>
+    document.getElementById(s).style.display = s === id ? 'flex' : 'none'
+  );
+}
+
+// ── PeerJS 연결 ───────────────────────────────────────
+function makePeer(id) {
+  return new Promise((resolve, reject) => {
+    const p = id ? new Peer(id) : new Peer();
+    p.on('open', () => resolve(p));
+    p.on('error', reject);
+  });
+}
+
+async function hostGame() {
+  setLobbyError('');
+  try {
+    const code = randomCode();
+    peer = await makePeer('omok-' + code);
+    myCode = code;
+    myColor = 1;
+    document.getElementById('room-code-display').textContent = code;
+    show('waiting');
+
+    peer.on('connection', c => {
+      conn = c;
+      setupConn();
+      startOnlineGame();
+      send({ type: 'start', color: 2 });
+    });
+  } catch(e) {
+    setLobbyError('연결 실패. 다시 시도해주세요.');
+  }
+}
+
+async function joinGame() {
+  const code = document.getElementById('codeInput').value.trim().toUpperCase();
+  if (code.length < 4) return setLobbyError('코드를 입력해주세요.');
+  setLobbyError('연결 중...');
+  try {
+    peer = await makePeer();
+    conn = peer.connect('omok-' + code);
+    conn.on('open', () => {
+      setLobbyError('');
+    });
+    setupConn();
+  } catch(e) {
+    setLobbyError('연결 실패. 코드를 확인해주세요.');
+  }
+}
+
+function setupConn() {
+  conn.on('data', handleMsg);
+  conn.on('close', () => {
+    if (mode === 'online') setStatus('상대방 연결이 끊어졌어요.');
+  });
+}
+
+function send(data) {
+  if (conn && conn.open) conn.send(data);
+}
+
+function handleMsg(msg) {
+  if (msg.type === 'start') {
+    myColor = msg.color;
+    startOnlineGame();
+  } else if (msg.type === 'place') {
+    applyPlace(msg.r, msg.c, msg.player);
+  } else if (msg.type === 'restart') {
+    resetGame();
+    updateOnlineStatus();
+  } else if (msg.type === 'restart_req') {
+    if (confirm('상대방이 새 게임을 요청했어요. 수락할까요?')) {
+      resetGame();
+      send({ type: 'restart' });
+      updateOnlineStatus();
+    }
+  }
+}
+
+// ── 온라인 게임 시작 ──────────────────────────────────
+function startOnlineGame() {
+  mode = 'online';
+  scoreBlack = 0; scoreWhite = 0;
+  document.getElementById('scoreBlack').textContent = 0;
+  document.getElementById('scoreWhite').textContent = 0;
+  show('game');
+  resetGame();
+  updateOnlineStatus();
+}
+
+function updateOnlineStatus() {
+  const stone = myColor === 1 ? '⚫ 흑' : '⚪ 백';
+  document.getElementById('online-badge').innerHTML = `온라인 대전 | 나: <span>${stone}</span>`;
+  const myTurn = currentPlayer === myColor;
+  const turnStone = currentPlayer === 1 ? '⚫ 흑' : '⚪ 백';
+  setStatus(myTurn ? `<b>내 차례 (${turnStone})</b>` : `상대방 차례 (${turnStone})`);
+}
+
+// ── 로컬 게임 ─────────────────────────────────────────
+function startLocal() {
+  mode = 'local';
+  scoreBlack = 0; scoreWhite = 0;
+  document.getElementById('scoreBlack').textContent = 0;
+  document.getElementById('scoreWhite').textContent = 0;
+  document.getElementById('online-badge').textContent = '로컬 대전';
+  show('game');
+  resetGame();
+  setStatus('⚫ 흑의 차례');
+}
+
+// ── 공통 게임 로직 ────────────────────────────────────
+function resetGame() {
+  board = Array.from({ length: BOARD }, () => Array(BOARD).fill(0));
+  currentPlayer = 1;
+  gameOver = false;
+  draw();
+}
+
+function requestRestart() {
+  if (mode === 'online') {
+    send({ type: 'restart_req' });
+    setStatus('새 게임 요청을 보냈어요...');
+  } else {
+    resetGame();
+    setStatus('⚫ 흑의 차례');
+  }
+}
+
+canvas.addEventListener('click', e => {
+  if (gameOver) return;
+  if (mode === 'online' && currentPlayer !== myColor) return;
+  const rect = canvas.getBoundingClientRect();
+  const c = Math.round(((e.clientX - rect.left) * (canvas.width / rect.width) - PAD) / CELL);
+  const r = Math.round(((e.clientY - rect.top) * (canvas.height / rect.height) - PAD) / CELL);
+  if (r < 0 || r >= BOARD || c < 0 || c >= BOARD || board[r][c]) return;
+
+  applyPlace(r, c, currentPlayer);
+  if (mode === 'online') send({ type: 'place', r, c, player: currentPlayer });
+});
+
+canvas.addEventListener('mousemove', e => {
+  if (gameOver) return;
+  if (mode === 'online' && currentPlayer !== myColor) return;
+  const rect = canvas.getBoundingClientRect();
+  const c = Math.round(((e.clientX - rect.left) * (canvas.width / rect.width) - PAD) / CELL);
+  const r = Math.round(((e.clientY - rect.top) * (canvas.height / rect.height) - PAD) / CELL);
+  draw();
+  if (r >= 0 && r < BOARD && c >= 0 && c < BOARD && !board[r][c])
+    drawStone(r, c, currentPlayer, 0.4);
+});
+canvas.addEventListener('mouseleave', draw);
+
+function applyPlace(r, c, player) {
+  board[r][c] = player;
+  draw();
+
+  if (checkWin(r, c, player)) {
+    const stone = player === 1 ? '⚫ 흑' : '⚪ 백';
+    if (mode === 'online') {
+      setStatus(player === myColor ? '<b>내가 이겼어요! 🎉</b>' : `<b>${stone} 승리! 😢</b>`);
+    } else {
+      setStatus(`<b>${stone} 승리! 🎉</b>`);
+    }
+    gameOver = true;
+    if (player === 1) { scoreBlack++; document.getElementById('scoreBlack').textContent = scoreBlack; }
+    else { scoreWhite++; document.getElementById('scoreWhite').textContent = scoreWhite; }
+    return;
+  }
+
+  if (board.flat().every(v => v !== 0)) {
+    setStatus('무승부!'); gameOver = true; return;
+  }
+
+  currentPlayer = player === 1 ? 2 : 1;
+  if (mode === 'online') {
+    updateOnlineStatus();
+  } else {
+    setStatus(currentPlayer === 1 ? '⚫ 흑의 차례' : '⚪ 백의 차례');
+  }
+}
+
+function checkWin(r, c, player) {
+  const dirs = [[0,1],[1,0],[1,1],[1,-1]];
+  for (const [dr, dc] of dirs) {
+    let n = 1;
+    for (let d=1;d<5;d++){const nr=r+dr*d,nc=c+dc*d;if(nr<0||nr>=BOARD||nc<0||nc>=BOARD||board[nr][nc]!==player)break;n++;}
+    for (let d=1;d<5;d++){const nr=r-dr*d,nc=c-dc*d;if(nr<0||nr>=BOARD||nc<0||nc>=BOARD||board[nr][nc]!==player)break;n++;}
+    if (n >= 5) return true;
+  }
+  return false;
+}
+
+// ── 그리기 ───────────────────────────────────────────
+function draw() {
+  ctx.clearRect(0, 0, SIZE, SIZE);
+  ctx.fillStyle = '#c8a96e'; ctx.fillRect(0, 0, SIZE, SIZE);
+  ctx.strokeStyle = '#8b6914'; ctx.lineWidth = 1;
+  for (let i = 0; i < BOARD; i++) {
+    const x = PAD + i*CELL;
+    ctx.beginPath(); ctx.moveTo(x, PAD); ctx.lineTo(x, PAD+(BOARD-1)*CELL); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(PAD, x); ctx.lineTo(PAD+(BOARD-1)*CELL, x); ctx.stroke();
+  }
+  const dots = [3,7,11]; ctx.fillStyle = '#8b6914';
+  for (const r of dots) for (const c of dots) {
+    ctx.beginPath(); ctx.arc(PAD+c*CELL, PAD+r*CELL, 4, 0, Math.PI*2); ctx.fill();
+  }
+  for (let r=0;r<BOARD;r++) for (let c=0;c<BOARD;c++) if (board[r][c]) drawStone(r,c,board[r][c]);
+}
+
+function drawStone(r, c, player, alpha=1) {
+  const x=PAD+c*CELL, y=PAD+r*CELL, rad=CELL*0.45;
+  ctx.globalAlpha = alpha;
+  const g = ctx.createRadialGradient(x-rad*0.3, y-rad*0.3, rad*0.1, x, y, rad);
+  if (player===1){g.addColorStop(0,'#555');g.addColorStop(1,'#000');}
+  else{g.addColorStop(0,'#fff');g.addColorStop(1,'#ccc');}
+  ctx.beginPath(); ctx.arc(x,y,rad,0,Math.PI*2); ctx.fillStyle=g; ctx.fill();
+  ctx.globalAlpha=1;
+}
+
+// ── 유틸 ─────────────────────────────────────────────
+function randomCode() {
+  return Math.random().toString(36).slice(2,7).toUpperCase();
+}
+function setStatus(msg) { document.getElementById('status').innerHTML = msg; }
+function setLobbyError(msg) { document.getElementById('lobby-error').textContent = msg; }
+function copyCode() {
+  navigator.clipboard.writeText(myCode);
+  document.getElementById('copy-hint').textContent = '✅ 복사됐어요!';
+  setTimeout(() => document.getElementById('copy-hint').textContent = '클릭하면 복사돼요', 2000);
+}
+function cancelWait() { peer?.destroy(); peer=null; show('lobby'); }
+function backToLobby() { peer?.destroy(); peer=null; conn=null; mode='local'; show('lobby'); }
+
+show('lobby');
+</script>
+</body>
+</html>
